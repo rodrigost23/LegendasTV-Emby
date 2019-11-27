@@ -11,7 +11,7 @@ using System.Linq;
 namespace LegendasTV
 {
 
-    public class Plugin : BasePlugin, IHasWebPages
+    public class Plugin : BasePlugin, IHasWebPages, IHasThumbImage
     {
         public override string Name => "Legendas TV";
 
@@ -35,6 +35,14 @@ namespace LegendasTV
                     EmbeddedResourcePath = GetType().Namespace + ".Configuration.legendastv.js"
                 }
             };
+
+        public Stream GetThumbImage()
+        {
+            var type = GetType();
+            return type.Assembly.GetManifestResourceStream(type.Namespace + ".thumb.png");
+        }
+
+        public ImageFormat ThumbImageFormat => ImageFormat.Png;
 
     }
 }

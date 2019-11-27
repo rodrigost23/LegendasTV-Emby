@@ -14,11 +14,13 @@
   <ItemGroup>
     <None Remove="Configuration\legendastv.html" />
     <None Remove="Configuration\legendastv.js" />
+    <None Remove="thumb.png" />
   </ItemGroup>
 
   <ItemGroup>
     <EmbeddedResource Include="Configuration\legendastv.html" />
     <EmbeddedResource Include="Configuration\legendastv.js" />
+    <EmbeddedResource Include="thumb.png" />
   </ItemGroup>
 
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">
