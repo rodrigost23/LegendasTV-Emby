@@ -1,0 +1,49 @@
+<div id="legendastvConfigurationPage" data-role="page"
+    class="page type-interior pluginConfigurationPage legendastvConfigurationPage"
+    data-helpurl="https://github.com/MediaBrowser/Wiki/wiki/Subtitles"
+    data-require="emby-input,emby-button" data-controller="__plugin/legendastvjs">
+
+    <div data-role="content">
+        <div class="content-primary">
+
+            <h1>Legendas TV</h1>
+
+            <form id="legendastvConfigurationForm">
+                <div style="height:0; overflow: hidden;"><input type="text"
+                        name="fakeusernameremembered" tabindex="-1" /><input
+                        type="password" name="fakepasswordremembered"
+                        tabindex="-1" />
+                </div>
+
+                <div style="display: none;">
+                    <input type="text" id="PreventChromeAutocomplete"
+                        name="PreventChromeAutocomplete"
+                        autocomplete="address-level4" />
+                </div>
+
+                <br />
+                <div class="inputContainer">
+                    <input is="emby-input" type="text" id="txtUsername"
+                        autocomplete="off" label="${LabelUsername}" />
+                    <div class="fieldDescription">
+                        <a is="emby-linkbutton" class="button-link"
+                            target="_blank"
+                            href="http://legendas.tv/register"><span>${ButtonRegister}</span></a>
+                    </div>
+                </div>
+
+                <div class="inputContainer">
+                    <input is="emby-input" type="password" id="txtPassword"
+                        autocomplete="off" label="${LabelPassword}" />
+                </div>
+
+                <div>
+                    <button is="emby-button" type="submit"
+                        class="raised button-submit block"><span>${ButtonSave}</span></button>
+                </div>
+                <div class="fieldDescription">
+                    <span>${SubtitleDownloadInstructions}</span></div>
+            </form>
+        </div>
+    </div>
+</div>

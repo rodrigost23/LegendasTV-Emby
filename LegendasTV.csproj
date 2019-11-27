@@ -11,6 +11,16 @@
     <PackageReference Include="mediabrowser.server.core" Version="4.3.0.12" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Remove="Configuration\legendastv.html" />
+    <None Remove="Configuration\legendastv.js" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Configuration\legendastv.html" />
+    <EmbeddedResource Include="Configuration\legendastv.js" />
+  </ItemGroup>
+
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">
     <Exec Command="xcopy &quot;$(TargetPath)&quot; &quot;%AppData%\Emby-Server\programdata\plugins\&quot; /y" />
   </Target>
