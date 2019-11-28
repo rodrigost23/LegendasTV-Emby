@@ -1,25 +1,29 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>netstandard2.0</TargetFrameworks>
+    <TargetFrameworks>netstandard2.0;</TargetFrameworks>
     <AssemblyVersion>0.0.1.0</AssemblyVersion>
     <FileVersion>0.0.1.0</FileVersion>
     <Version>0.0.1</Version>
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="HtmlAgilityPack" Version="1.11.17" />
     <PackageReference Include="mediabrowser.server.core" Version="4.3.0.12" />
+    <PackageReference Include="System.Memory" Version="4.5.3" />
   </ItemGroup>
 
   <ItemGroup>
     <None Remove="Configuration\legendastv.html" />
     <None Remove="Configuration\legendastv.js" />
+    <None Remove="HtmlAgilityPack.dll" />
     <None Remove="thumb.png" />
   </ItemGroup>
 
   <ItemGroup>
     <EmbeddedResource Include="Configuration\legendastv.html" />
     <EmbeddedResource Include="Configuration\legendastv.js" />
+    <EmbeddedResource Include="HtmlAgilityPack.dll" />
     <EmbeddedResource Include="thumb.png" />
   </ItemGroup>
 
