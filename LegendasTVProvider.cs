@@ -85,11 +85,7 @@ namespace LegendasTV
 
             if (await Login())
             {
-                BaseItem item = _libraryManager.FindByPath(request.MediaPath, false);
-
-                string imdbId = item.ProviderIds["Imdb"].Substring(2);
-
-                var legendatvId = await FindId(request, imdbId, cancellationToken);
+                var legendatvId = await FindId(request, cancellationToken);
 
                 return Array.Empty<RemoteSubtitleInfo>();
             }
@@ -99,17 +95,23 @@ namespace LegendasTV
             }
         }
 
-        private async Task<int> FindId(SubtitleSearchRequest request, string imdbId, CancellationToken cancellationToken, int depth = 0)
+        private async Task<List<int>> FindId(SubtitleSearchRequest request, CancellationToken cancellationToken, int depth = 0)
         {
+            var result = new List<int>();
             BaseItem item = _libraryManager.FindByPath(request.MediaPath, false);
             var query = "";
+
+            string imdbId = "";
             switch (request.ContentType)
             {
                 case VideoContentType.Episode:
-                    query = String.Format("{0}", request.SeriesName, request.ParentIndexNumber, request.IndexNumber);
+                    var series = ((Episode)item).Series;
+                    query = series.OriginalTitle;
+                    imdbId = series.ProviderIds["Imdb"].Substring(2);
                     break;
                 case VideoContentType.Movie:
                     query = item.OriginalTitle;
+                    imdbId = item.ProviderIds["Imdb"].Substring(2);
                     break;
             }
 
@@ -124,19 +126,21 @@ namespace LegendasTV
                 using (var reader = new StreamReader(stream))
                 {
                     var response = reader.ReadToEnd();
-                    _logger.Info(response);
                     var suggestions = _jsonSerializer.DeserializeFromString<List<LegendasTVSuggestion>>(response);
-                    _logger.Info(response.ToString());
+
                     foreach (var suggestion in suggestions)
                     {
-                        var source = suggestion.source;
-                        _logger.Info(source.ToString());
-                        if (source.id_imdb == imdbId)
+                        var source = suggestion._source;
+                        _logger.Info("1:::" + source.id_imdb + " " + imdbId + (source.id_imdb == imdbId ? "TRUE" : "FALSE"));
+                        _logger.Info("2:::" + ((request.ContentType == VideoContentType.Movie ? source.tipo == "M" : true) ? "TRUE" : "FALSE"));
+                        _logger.Info("3:::" + source.id_imdb == imdbId && (request.ContentType == VideoContentType.Movie ? source.tipo == "M" : true) ? "TRUE" : "FALSE");
+                        if (source.id_imdb == imdbId && (request.ContentType == VideoContentType.Movie ? source.tipo == "M" : true))
                         {
-
+                            await Search(cancellationToken, itemId: source.id_filme); //TODO: Move search to another method
+                            result.Add(int.Parse(source.id_filme));
                         }
                     }
-                    return -1;
+                    return result;
                 }
 
             }
@@ -163,6 +167,7 @@ namespace LegendasTV
                 using (var reader = new StreamReader(stream))
                 {
                     var response = reader.ReadToEnd();
+                    _logger.Info(response);
                     // TODO: parse resulting HTML
                     return Array.Empty<RemoteSubtitleInfo>();
                 }
@@ -249,34 +254,34 @@ namespace LegendasTV
     {
         public class LegendasTVSource
         {
-            public string id_filme = null;
-            public string id_imdb = null;
-            public string tipo = null;
-            public string int_genero = null;
-            public string dsc_imagen = null;
-            public string dsc_nome = null;
-            public string dsc_sinopse = null;
-            public string dsc_data_lancamento = null;
-            public string dsc_url_imdb = null;
-            public string dsc_nome_br = null;
-            public string soundex = null;
-            public string temporada = null;
-            public string id_usuario = null;
-            public string flg_liberado = null;
-            public string dsc_data_liberacao = null;
-            public string dsc_data = null;
-            public string dsc_metaphone_us = null;
-            public string dsc_metaphone_br = null;
-            public string episodios = null;
-            public string flg_seriado = null;
-            public string last_used = null;
-            public string deleted = null;
+            public string id_filme { get; set; }
+            public string id_imdb { get; set; }
+            public string tipo { get; set; }
+            public string int_genero { get; set; }
+            public string dsc_imagen { get; set; }
+            public string dsc_nome { get; set; }
+            public string dsc_sinopse { get; set; }
+            public string dsc_data_lancamento { get; set; }
+            public string dsc_url_imdb { get; set; }
+            public string dsc_nome_br { get; set; }
+            public string soundex { get; set; }
+            public string temporada { get; set; }
+            public string id_usuario { get; set; }
+            public string flg_liberado { get; set; }
+            public string dsc_data_liberacao { get; set; }
+            public string dsc_data { get; set; }
+            public string dsc_metaphone_us { get; set; }
+            public string dsc_metaphone_br { get; set; }
+            public string episodios { get; set; }
+            public string flg_seriado { get; set; }
+            public string last_used { get; set; }
+            public string deleted { get; set; }
         }
 
-        public string index = null;
-        public string type = null;
-        public string id = null;
-        public string score = null;
-        public LegendasTVSource source = null;
+        public string _index { get; set; }
+        public string _type { get; set; }
+        public string _id { get; set; }
+        public string _score { get; set; }
+        public LegendasTVSource _source { get; set; }
     }
 }
