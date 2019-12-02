@@ -1,3 +1,4 @@
+using System.Linq;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -83,11 +84,47 @@ namespace LegendasTV
                 return Array.Empty<RemoteSubtitleInfo>();
             }
 
+            var lang = "-"; //TODO: get language from search
+
             if (await Login())
             {
-                var legendatvId = await FindId(request, cancellationToken);
+                var legendatvIds = FindIds(request, cancellationToken);
+                var searchTasks = new List<Task<IEnumerable<RemoteSubtitleInfo>>>();
+                Action<string> addSearchTask;
+                switch (request.ContentType)
+                {
+                    // Series Episode
+                    case VideoContentType.Episode:
+                        {
+                            addSearchTask = (id) =>
+                            {
+                                searchTasks.Add(Search(cancellationToken, itemId: id, lang: lang, query: $"S{request.ParentIndexNumber:D02}E{request.IndexNumber:D02}"));
+                                searchTasks.Add(Search(cancellationToken, itemId: id, lang: lang, query: $"{request.ParentIndexNumber:D02}x{request.IndexNumber:D02}"));
+                            };
+                            break;
+                        }
 
-                return Array.Empty<RemoteSubtitleInfo>();
+                    // Movie
+                    default:
+                    case VideoContentType.Movie:
+                        {
+                            addSearchTask = (id) =>
+                            {
+                                searchTasks.Add(Search(cancellationToken, itemId: id));
+                            };
+
+                            break;
+                        }
+                }
+
+                foreach (var id in legendatvIds)
+                {
+                    addSearchTask(id);
+                }
+
+                await Task.WhenAll(searchTasks);
+
+                return searchTasks.SelectMany(t => t.Result);
             }
             else
             {
@@ -95,7 +132,7 @@ namespace LegendasTV
             }
         }
 
-        private async Task<List<int>> FindId(SubtitleSearchRequest request, CancellationToken cancellationToken, int depth = 0)
+        private IEnumerable<string> FindIds(SubtitleSearchRequest request, CancellationToken cancellationToken, int depth = 0)
         {
             var result = new List<int>();
             BaseItem item = _libraryManager.FindByPath(request.MediaPath, false);
@@ -121,7 +158,7 @@ namespace LegendasTV
                 CancellationToken = cancellationToken,
             };
 
-            using (var stream = await _httpClient.Get(requestOptions))
+            using (var stream = _httpClient.Get(requestOptions).Result)
             {
                 using (var reader = new StreamReader(stream))
                 {
@@ -131,16 +168,11 @@ namespace LegendasTV
                     foreach (var suggestion in suggestions)
                     {
                         var source = suggestion._source;
-                        _logger.Info("1:::" + source.id_imdb + " " + imdbId + (source.id_imdb == imdbId ? "TRUE" : "FALSE"));
-                        _logger.Info("2:::" + ((request.ContentType == VideoContentType.Movie ? source.tipo == "M" : true) ? "TRUE" : "FALSE"));
-                        _logger.Info("3:::" + source.id_imdb == imdbId && (request.ContentType == VideoContentType.Movie ? source.tipo == "M" : true) ? "TRUE" : "FALSE");
                         if (source.id_imdb == imdbId && (request.ContentType == VideoContentType.Movie ? source.tipo == "M" : true))
                         {
-                            await Search(cancellationToken, itemId: source.id_filme); //TODO: Move search to another method
-                            result.Add(int.Parse(source.id_filme));
+                            yield return source.id_filme;
                         }
                     }
-                    return result;
                 }
 
             }
@@ -168,10 +200,33 @@ namespace LegendasTV
                 {
                     var response = reader.ReadToEnd();
                     _logger.Info(response);
-                    // TODO: parse resulting HTML
-                    return Array.Empty<RemoteSubtitleInfo>();
+
+                    return ParseHtml(response);
                 }
             }
+        }
+
+        private IEnumerable<RemoteSubtitleInfo> ParseHtml(string html)
+        {
+            var doc = new HtmlDocument();
+            doc.LoadHtml(html);
+            var subtitleNodes = doc.DocumentNode.SelectNodes("//div[contains(@class, 'list_element')]//article/div") ?? new HtmlNodeCollection(doc.DocumentNode);
+
+            foreach (var subtitleNode in subtitleNodes)
+            {
+                _logger.Info("Id: " + subtitleNode.SelectSingleNode(".//span[contains(@class, 'number')]").InnerText);
+                _logger.Info("Name: " + subtitleNode.SelectSingleNode(".//a").InnerText);
+                yield return new RemoteSubtitleInfo()
+                {
+                    Id = subtitleNode.SelectSingleNode(".//span[contains(@class, 'number')]").InnerText,
+                    Name = subtitleNode.SelectSingleNode(".//a").InnerText,
+                    Format = "srt",
+                    IsForced = false,
+                    IsHashMatch = false,
+                    ProviderName = "Legendas.TV",
+                };
+            }
+
         }
 
         public async Task<bool> Login()
