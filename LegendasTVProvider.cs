@@ -33,16 +33,13 @@ namespace LegendasTV
 {
     class LegendasTVProvider : ISubtitleProvider, IDisposable
     {
-        public static readonly string URL_BASE = "http://legendas.tv/";
-        public static readonly string URL_DOWNLOAD = URL_BASE + "info.php?d=%s&c=1";
-        public static readonly string URL_LOGIN = URL_BASE + "login";
+        public static readonly string URL_BASE = "http://legendas.tv";
+        public static readonly string URL_LOGIN = URL_BASE + "/login";
 
         private readonly ILogger _logger;
         private readonly IHttpClient _httpClient;
         private readonly IServerConfigurationManager _config;
         private readonly IEncryptionManager _encryption;
-        private readonly IJsonSerializer _json;
-        private readonly IFileSystem _fileSystem;
         private readonly ILibraryManager _libraryManager;
         private readonly ILocalizationManager _localizationManager;
         private readonly IJsonSerializer _jsonSerializer;
@@ -50,15 +47,14 @@ namespace LegendasTV
 
         public string Name => "Legendas TV";
 
+        public IEnumerable<VideoContentType> SupportedMediaTypes => new[] { VideoContentType.Episode, VideoContentType.Movie };
 
-        public LegendasTVProvider(ILogger logger, IHttpClient httpClient, IServerConfigurationManager config, IEncryptionManager encryption, IJsonSerializer json, IFileSystem fileSystem, ILocalizationManager localizationManager, ILibraryManager libraryManager, IJsonSerializer jsonSerializer)
+        public LegendasTVProvider(ILogger logger, IHttpClient httpClient, IServerConfigurationManager config, IEncryptionManager encryption, ILocalizationManager localizationManager, ILibraryManager libraryManager, IJsonSerializer jsonSerializer)
         {
             _logger = logger;
             _httpClient = httpClient;
             _config = config;
             _encryption = encryption;
-            _json = json;
-            _fileSystem = fileSystem;
             _libraryManager = libraryManager;
             _localizationManager = localizationManager;
             _jsonSerializer = jsonSerializer;
@@ -71,13 +67,6 @@ namespace LegendasTV
         }
 
         private LegendasTVOptions GetOptions() => _config.GetLegendasTVConfiguration();
-
-        public IEnumerable<VideoContentType> SupportedMediaTypes => new[] { VideoContentType.Episode, VideoContentType.Movie };
-
-        public async Task<SubtitleResponse> GetSubtitles(string id, CancellationToken cancellationToken)
-        {
-            throw new NotImplementedException();
-        }
 
         public async Task<IEnumerable<RemoteSubtitleInfo>> Search(SubtitleSearchRequest request, CancellationToken cancellationToken)
         {
@@ -156,7 +145,7 @@ namespace LegendasTV
 
             var requestOptions = new HttpRequestOptions()
             {
-                Url = string.Format(URL_BASE + "legenda/sugestao/{0}", HttpUtility.HtmlEncode(query)),
+                Url = string.Format(URL_BASE + "/legenda/sugestao/{0}", HttpUtility.HtmlEncode(query)),
                 CancellationToken = cancellationToken,
             };
 
@@ -190,9 +179,9 @@ namespace LegendasTV
         {
             var requestOptions = new HttpRequestOptions()
             {
-                Url = string.Format(URL_BASE + "legenda/busca/{0}/{1}/-/{2}/{3}", HttpUtility.HtmlEncode(query), lang, page, itemId),
+                Url = string.Format(URL_BASE + "/legenda/busca/{0}/{1}/-/{2}/{3}", HttpUtility.HtmlEncode(query), lang, page, itemId),
                 CancellationToken = cancellationToken,
-                Referer = URL_BASE + "busca/" + query
+                Referer = URL_BASE + "/busca/" + query
             };
             requestOptions.RequestHeaders.Add("X-Requested-With", "XMLHttpRequest");
 
@@ -220,10 +209,12 @@ namespace LegendasTV
                 var data = subtitleNode.SelectSingleNode(".//p[contains(@class, 'data')]");
                 var dataMatch = Regex.Match(data.InnerText.Trim(), @"^\D*?(\d+) +downloads,.*nota +(\d+) *,.*em *(.+)$").Groups;
 
+                _logger.Info(Regex.Match(link.Attributes["href"].Value, @"^.*download\/(.*?)\/.*$").Groups[1].Value);
+
                 //TODO: put "destaque" on top
                 yield return new RemoteSubtitleInfo()
                 {
-                    Id = link.Attributes["href"].Value,
+                    Id = Regex.Match(link.Attributes["href"].Value, @"^.*download\/(.*?)\/.*$").Groups[1].Value,
                     Name = link.InnerText,
                     DownloadCount = int.Parse(dataMatch[1].Value),
                     CommunityRating = float.Parse(dataMatch[2].Value),
@@ -231,8 +222,10 @@ namespace LegendasTV
                     Format = "srt",
                     IsForced = false,
                     IsHashMatch = false,
-                    ProviderName = "Legendas.TV",
-                    Comment = "Still doesn't work, don't try to download it yet!"
+                    ProviderName = this.Name,
+                    Comment = "Still doesn't work, don't try to download it yet!",
+                    Author = "",
+                    ThreeLetterISOLanguageName = "pob" // TODO: Change language
                 };
             }
 
@@ -252,6 +245,27 @@ namespace LegendasTV
             }
 
             return true;
+        }
+
+        public async Task<SubtitleResponse> GetSubtitles(string id, CancellationToken cancellationToken)
+        {
+            _logger.Info(id);
+            var requestOptions = new HttpRequestOptions()
+            {
+                Url = string.Format(URL_BASE + "/downloadarquivo/" + id),
+                CancellationToken = cancellationToken,
+            };
+
+            using (var stream = await _httpClient.Get(requestOptions))
+            {
+                return new SubtitleResponse()
+                {
+                    Format = "srt",
+                    IsForced = false,
+                    Stream = stream,
+                    Language = "pt-br" // TODO: Change language
+                };
+            }
         }
 
         private async Task<string> SendPost(string url, string postData)
