@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text.RegularExpressions;
 using System.Linq;
 using System;
 using System.Collections.Generic;
@@ -214,16 +216,23 @@ namespace LegendasTV
 
             foreach (var subtitleNode in subtitleNodes)
             {
-                _logger.Info("Id: " + subtitleNode.SelectSingleNode(".//span[contains(@class, 'number')]").InnerText);
-                _logger.Info("Name: " + subtitleNode.SelectSingleNode(".//a").InnerText);
+                var link = subtitleNode.SelectSingleNode(".//a");
+                var data = subtitleNode.SelectSingleNode(".//p[contains(@class, 'data')]");
+                var dataMatch = Regex.Match(data.InnerText.Trim(), @"^\D*?(\d+) +downloads,.*nota +(\d+) *,.*em *(.+)$").Groups;
+
+                //TODO: put "destaque" on top
                 yield return new RemoteSubtitleInfo()
                 {
-                    Id = subtitleNode.SelectSingleNode(".//span[contains(@class, 'number')]").InnerText,
-                    Name = subtitleNode.SelectSingleNode(".//a").InnerText,
+                    Id = link.Attributes["href"].Value,
+                    Name = link.InnerText,
+                    DownloadCount = int.Parse(dataMatch[1].Value),
+                    CommunityRating = float.Parse(dataMatch[2].Value),
+                    DateCreated = DateTimeOffset.ParseExact("15/11/2019 - 12:43", "dd/MM/yyyy - HH:mm", CultureInfo.InvariantCulture),
                     Format = "srt",
                     IsForced = false,
                     IsHashMatch = false,
                     ProviderName = "Legendas.TV",
+                    Comment = "Still doesn't work, don't try to download it yet!"
                 };
             }
 
