@@ -88,12 +88,12 @@ namespace LegendasTV
 
         public async Task<IEnumerable<RemoteSubtitleInfo>> Search(SubtitleSearchRequest request, CancellationToken cancellationToken)
         {
-            if (request.IsForced.HasValue || request.IsPerfectMatch)
+            var lang = _localizationManager.FindLanguageInfo(request.Language.AsSpan());
+
+            if (request.IsForced.HasValue || request.IsPerfectMatch || GetLanguageId(lang) == null)
             {
                 return Array.Empty<RemoteSubtitleInfo>();
             }
-
-            var lang = "-"; //TODO: get language from search
 
             if (await Login())
             {
@@ -119,7 +119,7 @@ namespace LegendasTV
                         {
                             addSearchTask = (id) =>
                             {
-                                searchTasks.Add(Search(cancellationToken, itemId: id));
+                                searchTasks.Add(Search(cancellationToken, lang: lang, itemId: id));
                             };
 
                             break;
@@ -189,15 +189,21 @@ namespace LegendasTV
 
         public async Task<IEnumerable<RemoteSubtitleInfo>> Search(
             CancellationToken cancellationToken,
+            CultureDto lang = null,
             string query = "-",
-            string lang = "-",
             string page = "-",
             string itemId = "-"
             )
         {
+            if (lang == null)
+            {
+                _logger.Error("No language defined.");
+                return Array.Empty<RemoteSubtitleInfo>();
+            }
+
             var requestOptions = new HttpRequestOptions()
             {
-                Url = string.Format(URL_BASE + "/legenda/busca/{0}/{1}/-/{2}/{3}", HttpUtility.HtmlEncode(query), lang, page, itemId),
+                Url = string.Format(URL_BASE + "/legenda/busca/{0}/{1}/-/{2}/{3}", HttpUtility.HtmlEncode(query), GetLanguageId(lang), page, itemId),
                 CancellationToken = cancellationToken,
                 Referer = URL_BASE + "/busca/" + query
             };
@@ -209,12 +215,12 @@ namespace LegendasTV
                 {
                     var response = reader.ReadToEnd();
 
-                    return ParseHtml(response);
+                    return ParseHtml(response, lang);
                 }
             }
         }
 
-        private IEnumerable<RemoteSubtitleInfo> ParseHtml(string html)
+        private IEnumerable<RemoteSubtitleInfo> ParseHtml(string html, CultureDto lang)
         {
             var doc = new HtmlDocument();
             doc.LoadHtml(html);
@@ -228,10 +234,10 @@ namespace LegendasTV
 
                 var downloadId = Regex.Match(link.Attributes["href"].Value, @"^.*download\/(.*?)\/.*$").Groups[1].Value;
                 var name = link.InnerText;
-                //TODO: put "destaque" on top
+                //TODO: put "destaque" on top and sort by downloads
                 yield return new RemoteSubtitleInfo()
                 {
-                    Id = $"{downloadId}:{name}:pt-br", //TODO: Change language
+                    Id = $"{downloadId}:{name}:{lang.TwoLetterISOLanguageName}",
                     Name = name,
                     DownloadCount = int.Parse(dataMatch[1].Value),
                     CommunityRating = float.Parse(dataMatch[2].Value),
@@ -241,7 +247,7 @@ namespace LegendasTV
                     IsHashMatch = false,
                     ProviderName = this.Name,
                     Author = data.SelectSingleNode("//a")?.InnerText,
-                    ThreeLetterISOLanguageName = "pob" // TODO: Change language
+                    ThreeLetterISOLanguageName = lang.ThreeLetterISOLanguageName
                 };
             }
 
@@ -327,6 +333,38 @@ namespace LegendasTV
                 Stream = ms,
                 Language = language
             };
+        }
+
+        private string GetLanguageId(CultureDto cultureDto)
+        {
+            var search = cultureDto?.TwoLetterISOLanguageName ?? "";
+            if (search != "pt-br")
+            {
+                search = search.Split(new[] { '-' }, 2)?[0] ?? search;
+            }
+            _logger.Info("Searching language: " + search);
+            var langMap = new Dictionary<string, string>()
+            {
+                {"pt-br", "1"},
+                {"pt", "2"},
+                {"en", "3"},
+                {"fr", "4"},
+                {"de", "5"},
+                {"ja", "6"},
+                {"da", "7"},
+                {"nb", "8"},
+                {"sv", "9"},
+                {"es", "10"},
+                {"ar", "11"},
+                {"cs", "12"},
+                {"zh", "13"},
+                {"ko", "14"},
+                {"bg", "15"},
+                {"it", "16"},
+                {"pl", "17"}
+            };
+            string output;
+            return langMap.TryGetValue(search, out output) ? output : null;
         }
 
         private async Task<string> SendPost(string url, string postData)
