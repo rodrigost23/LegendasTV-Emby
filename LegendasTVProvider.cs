@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using System.Linq;
@@ -28,6 +29,7 @@ using MediaBrowser.Model.IO;
 using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Providers;
 using MediaBrowser.Model.Serialization;
+using MediaBrowser.Controller;
 
 namespace LegendasTV
 {
@@ -43,13 +45,26 @@ namespace LegendasTV
         private readonly ILibraryManager _libraryManager;
         private readonly ILocalizationManager _localizationManager;
         private readonly IJsonSerializer _jsonSerializer;
+        private readonly IServerApplicationPaths _appPaths;
+        private readonly IFileSystem _fileSystem;
+        private readonly IZipClient _zipClient;
         private const string PasswordHashPrefix = "h:";
 
         public string Name => "Legendas TV";
 
         public IEnumerable<VideoContentType> SupportedMediaTypes => new[] { VideoContentType.Episode, VideoContentType.Movie };
 
-        public LegendasTVProvider(ILogger logger, IHttpClient httpClient, IServerConfigurationManager config, IEncryptionManager encryption, ILocalizationManager localizationManager, ILibraryManager libraryManager, IJsonSerializer jsonSerializer)
+        public LegendasTVProvider(
+            ILogger logger,
+            IHttpClient httpClient,
+            IServerConfigurationManager config,
+            IEncryptionManager encryption,
+            ILocalizationManager localizationManager,
+            ILibraryManager libraryManager,
+            IJsonSerializer jsonSerializer,
+            IServerApplicationPaths appPaths,
+            IFileSystem fileSystem,
+            IZipClient zipClient)
         {
             _logger = logger;
             _httpClient = httpClient;
@@ -58,6 +73,9 @@ namespace LegendasTV
             _libraryManager = libraryManager;
             _localizationManager = localizationManager;
             _jsonSerializer = jsonSerializer;
+            _appPaths = appPaths;
+            _fileSystem = fileSystem;
+            _zipClient = zipClient;
 
             _config.NamedConfigurationUpdating += _config_NamedConfigurationUpdating;
 
@@ -190,7 +208,6 @@ namespace LegendasTV
                 using (var reader = new StreamReader(stream))
                 {
                     var response = reader.ReadToEnd();
-                    _logger.Info(response);
 
                     return ParseHtml(response);
                 }
@@ -209,13 +226,13 @@ namespace LegendasTV
                 var data = subtitleNode.SelectSingleNode(".//p[contains(@class, 'data')]");
                 var dataMatch = Regex.Match(data.InnerText.Trim(), @"^\D*?(\d+) +downloads,.*nota +(\d+) *,.*em *(.+)$").Groups;
 
-                _logger.Info(Regex.Match(link.Attributes["href"].Value, @"^.*download\/(.*?)\/.*$").Groups[1].Value);
-
+                var downloadId = Regex.Match(link.Attributes["href"].Value, @"^.*download\/(.*?)\/.*$").Groups[1].Value;
+                var name = link.InnerText;
                 //TODO: put "destaque" on top
                 yield return new RemoteSubtitleInfo()
                 {
-                    Id = Regex.Match(link.Attributes["href"].Value, @"^.*download\/(.*?)\/.*$").Groups[1].Value,
-                    Name = link.InnerText,
+                    Id = $"{downloadId}:{name}:pt-br", //TODO: Change language
+                    Name = name,
                     DownloadCount = int.Parse(dataMatch[1].Value),
                     CommunityRating = float.Parse(dataMatch[2].Value),
                     DateCreated = DateTimeOffset.ParseExact("15/11/2019 - 12:43", "dd/MM/yyyy - HH:mm", CultureInfo.InvariantCulture),
@@ -223,8 +240,7 @@ namespace LegendasTV
                     IsForced = false,
                     IsHashMatch = false,
                     ProviderName = this.Name,
-                    Comment = "Still doesn't work, don't try to download it yet!",
-                    Author = "",
+                    Author = data.SelectSingleNode("//a")?.InnerText,
                     ThreeLetterISOLanguageName = "pob" // TODO: Change language
                 };
             }
@@ -249,23 +265,68 @@ namespace LegendasTV
 
         public async Task<SubtitleResponse> GetSubtitles(string id, CancellationToken cancellationToken)
         {
-            _logger.Info(id);
+            return await GetSubtitles(id, cancellationToken, 0);
+        }
+
+        public async Task<SubtitleResponse> GetSubtitles(string id, CancellationToken cancellationToken, int depth = 0)
+        {
+
+            var idParts = id.Split(new[] { ':' }, 3);
+            var subtitleId = idParts[0];
+            var expectedName = idParts[1];
+            var language = idParts[2];
+            var savePath = $"{_appPaths.TempDirectory}{_fileSystem.DirectorySeparatorChar}{Name}_{subtitleId}";
+
             var requestOptions = new HttpRequestOptions()
             {
-                Url = string.Format(URL_BASE + "/downloadarquivo/" + id),
+                Url = string.Format(URL_BASE + "/downloadarquivo/" + subtitleId),
                 CancellationToken = cancellationToken,
             };
 
-            using (var stream = await _httpClient.Get(requestOptions))
+            try
             {
-                return new SubtitleResponse()
+                using (var stream = await _httpClient.Get(requestOptions))
                 {
-                    Format = "srt",
-                    IsForced = false,
-                    Stream = stream,
-                    Language = "pt-br" // TODO: Change language
-                };
+                    _logger.Info("Extracting file to " + savePath);
+                    _zipClient.ExtractAll(stream, savePath, true);
+
+                }
             }
+            catch (System.Exception)
+            {
+                if (depth < 1 && await Login())
+                {
+                    return await GetSubtitles(id, cancellationToken, depth + 1);
+                }
+                else
+                {
+                    throw;
+                }
+            }
+
+            var bestCandidate = "";
+            foreach (var file in _fileSystem.GetFiles(savePath, true))
+            {
+                _logger.Info(file.Name);
+                if (file.Extension.ToLowerInvariant() == ".srt" && (string.IsNullOrEmpty(bestCandidate) || _fileSystem.GetFileNameWithoutExtension(file.Name) == expectedName))
+                {
+                    bestCandidate = file.FullName;
+                }
+            }
+
+            _logger.Info("Best subtitle found: " + bestCandidate);
+
+            var ms = new MemoryStream();
+            await _fileSystem.GetFileStream(bestCandidate, FileOpenMode.Open, FileAccessMode.Read, FileShareMode.Read).CopyToAsync(ms);
+            ms.Position = 0;
+
+            return new SubtitleResponse()
+            {
+                Format = "srt",
+                IsForced = false,
+                Stream = ms,
+                Language = language
+            };
         }
 
         private async Task<string> SendPost(string url, string postData)
