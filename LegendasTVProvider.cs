@@ -215,7 +215,10 @@ namespace LegendasTV
                 {
                     var response = reader.ReadToEnd();
 
-                    return ParseHtml(response, lang);
+                    return ParseHtml(response, lang)
+                        .OrderBy(sub => LegendasTVIdParts.parse(sub.Id).sortingOverride)
+                        .ThenByDescending(sub => sub.CommunityRating)
+                        .ThenByDescending(sub => sub.DownloadCount);
                 }
             }
         }
@@ -234,10 +237,15 @@ namespace LegendasTV
 
                 var downloadId = Regex.Match(link.Attributes["href"].Value, @"^.*download\/(.*?)\/.*$").Groups[1].Value;
                 var name = link.InnerText;
-                //TODO: put "destaque" on top and sort by downloads
                 yield return new RemoteSubtitleInfo()
                 {
-                    Id = $"{downloadId}:{name}:{lang.TwoLetterISOLanguageName}",
+                    Id = new LegendasTVIdParts()
+                    {
+                        downloadId = downloadId,
+                        name = name,
+                        language = lang.TwoLetterISOLanguageName,
+                        sortingOverride = subtitleNode.HasClass("destaque") ? -1 : 0,
+                    }.fullId,
                     Name = name,
                     DownloadCount = int.Parse(dataMatch[1].Value),
                     CommunityRating = float.Parse(dataMatch[2].Value),
@@ -277,15 +285,12 @@ namespace LegendasTV
         public async Task<SubtitleResponse> GetSubtitles(string id, CancellationToken cancellationToken, int depth = 0)
         {
 
-            var idParts = id.Split(new[] { ':' }, 3);
-            var subtitleId = idParts[0];
-            var expectedName = idParts[1];
-            var language = idParts[2];
-            var savePath = $"{_appPaths.TempDirectory}{_fileSystem.DirectorySeparatorChar}{Name}_{subtitleId}";
+            var idParts = LegendasTVIdParts.parse(id);
+            var savePath = $"{_appPaths.TempDirectory}{_fileSystem.DirectorySeparatorChar}{Name}_{idParts.downloadId}";
 
             var requestOptions = new HttpRequestOptions()
             {
-                Url = string.Format(URL_BASE + "/downloadarquivo/" + subtitleId),
+                Url = string.Format(URL_BASE + "/downloadarquivo/" + idParts.downloadId),
                 CancellationToken = cancellationToken,
             };
 
@@ -314,7 +319,7 @@ namespace LegendasTV
             foreach (var file in _fileSystem.GetFiles(savePath, true))
             {
                 _logger.Info(file.Name);
-                if (file.Extension.ToLowerInvariant() == ".srt" && (string.IsNullOrEmpty(bestCandidate) || _fileSystem.GetFileNameWithoutExtension(file.Name) == expectedName))
+                if (file.Extension.ToLowerInvariant() == ".srt" && (string.IsNullOrEmpty(bestCandidate) || _fileSystem.GetFileNameWithoutExtension(file.Name) == idParts.name))
                 {
                     bestCandidate = file.FullName;
                 }
@@ -331,7 +336,7 @@ namespace LegendasTV
                 Format = "srt",
                 IsForced = false,
                 Stream = ms,
-                Language = language
+                Language = idParts.language
             };
         }
 
@@ -425,6 +430,36 @@ namespace LegendasTV
         public void Dispose() => GC.SuppressFinalize(this);
 
         ~LegendasTVProvider() => Dispose();
+    }
+
+    class LegendasTVIdParts
+    {
+        public string downloadId;
+        public string name;
+        public string language;
+        /// <summary>Set to higher number if this is to be sorted higher than the other parameters.</summary>
+        public int sortingOverride = 0;
+
+        public LegendasTVIdParts() { }
+
+        public override string ToString() => fullId;
+
+        public static LegendasTVIdParts parse(string id)
+        {
+            var idParts = id.Split(new[] { ':' }, 4);
+            return new LegendasTVIdParts()
+            {
+                downloadId = idParts[0],
+                name = idParts[1],
+                language = idParts[2],
+                sortingOverride = int.Parse(idParts[3]),
+            };
+        }
+
+        public string fullId
+        {
+            get => String.Join(":", downloadId, name, language, sortingOverride);
+        }
     }
 
     class LegendasTVSuggestion
