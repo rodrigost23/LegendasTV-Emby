@@ -177,7 +177,13 @@ namespace LegendasTV
                     foreach (var suggestion in suggestions)
                     {
                         var source = suggestion._source;
-                        if (source.id_imdb == imdbId && (request.ContentType == VideoContentType.Movie ? source.tipo == "M" : true))
+                        if (!int.TryParse(source.id_imdb, out var sourceImdb))
+                            break;
+                        if (!int.TryParse(imdbId, out var imdbIdInt))
+                            break;
+
+                        if (sourceImdb == imdbIdInt && 
+                           (request.ContentType == VideoContentType.Movie ? source.tipo == "M" : true))
                         {
                             yield return source.id_filme;
                         }
