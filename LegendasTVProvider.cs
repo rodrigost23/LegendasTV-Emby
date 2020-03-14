@@ -178,7 +178,7 @@ namespace LegendasTV
                     {
                         var source = suggestion._source;
                         if (!int.TryParse(source.id_imdb, out var sourceImdb))
-                            break;
+                            continue;
                         if (!int.TryParse(imdbId, out var imdbIdInt))
                             break;
 
