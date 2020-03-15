@@ -143,7 +143,6 @@ namespace LegendasTV
 
         private IEnumerable<string> FindIds(SubtitleSearchRequest request, CancellationToken cancellationToken, int depth = 0)
         {
-            var result = new List<int>();
             BaseItem item = _libraryManager.FindByPath(request.MediaPath, false);
             var query = "";
 
@@ -160,6 +159,8 @@ namespace LegendasTV
                     imdbId = item.ProviderIds["Imdb"].Substring(2);
                     break;
             }
+            if (!int.TryParse(imdbId, out var imdbIdInt))
+                imdbIdInt = -1;
 
             var requestOptions = new HttpRequestOptions()
             {
@@ -178,11 +179,9 @@ namespace LegendasTV
                     {
                         var source = suggestion._source;
                         if (!int.TryParse(source.id_imdb, out var sourceImdb))
-                            continue;
-                        if (!int.TryParse(imdbId, out var imdbIdInt))
-                            break;
+                            sourceImdb = -2;
 
-                        if (sourceImdb == imdbIdInt && 
+                        if (((sourceImdb == imdbIdInt) || (source.id_imdb == imdbId)) && 
                            (request.ContentType == VideoContentType.Movie ? source.tipo == "M" : true))
                         {
                             yield return source.id_filme;
