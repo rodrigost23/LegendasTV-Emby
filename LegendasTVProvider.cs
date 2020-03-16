@@ -97,7 +97,8 @@ namespace LegendasTV
 
             if (await Login())
             {
-                var legendatvIds = FindIds(request, cancellationToken);
+                BaseItem item = _libraryManager.FindByPath(request.MediaPath, false);
+                var legendatvIds = FindIds(request, item, cancellationToken);
                 var searchTasks = new List<Task<IEnumerable<RemoteSubtitleInfo>>>();
                 Action<string> addSearchTask;
                 switch (request.ContentType)
@@ -107,8 +108,8 @@ namespace LegendasTV
                         {
                             addSearchTask = (id) =>
                             {
-                                searchTasks.Add(Search(cancellationToken, itemId: id, lang: lang, query: $"S{request.ParentIndexNumber:D02}E{request.IndexNumber:D02}"));
-                                searchTasks.Add(Search(cancellationToken, itemId: id, lang: lang, query: $"{request.ParentIndexNumber:D02}x{request.IndexNumber:D02}"));
+                                searchTasks.Add(Search(item.Id, cancellationToken, itemId: id, lang: lang, query: $"S{request.ParentIndexNumber:D02}E{request.IndexNumber:D02}"));
+                                searchTasks.Add(Search(item.Id, cancellationToken, itemId: id, lang: lang, query: $"{request.ParentIndexNumber:D02}x{request.IndexNumber:D02}"));
                             };
                             break;
                         }
@@ -119,7 +120,7 @@ namespace LegendasTV
                         {
                             addSearchTask = (id) =>
                             {
-                                searchTasks.Add(Search(cancellationToken, lang: lang, itemId: id));
+                                searchTasks.Add(Search(item.Id, cancellationToken, lang: lang, itemId: id));
                             };
 
                             break;
@@ -141,9 +142,8 @@ namespace LegendasTV
             }
         }
 
-        private IEnumerable<string> FindIds(SubtitleSearchRequest request, CancellationToken cancellationToken, int depth = 0)
+        private IEnumerable<string> FindIds(SubtitleSearchRequest request, BaseItem item, CancellationToken cancellationToken, int depth = 0)
         {
-            BaseItem item = _libraryManager.FindByPath(request.MediaPath, false);
             var query = "";
 
             string imdbId = "";
@@ -193,6 +193,7 @@ namespace LegendasTV
         }
 
         public async Task<IEnumerable<RemoteSubtitleInfo>> Search(
+            Guid idMedia,
             CancellationToken cancellationToken,
             CultureDto lang = null,
             string query = "-",
@@ -220,7 +221,7 @@ namespace LegendasTV
                 {
                     var response = reader.ReadToEnd();
 
-                    return ParseHtml(response, lang)
+                    return ParseHtml(idMedia, response, lang)
                         .OrderBy(sub => LegendasTVIdParts.parse(sub.Id).sortingOverride)
                         .ThenByDescending(sub => sub.CommunityRating)
                         .ThenByDescending(sub => sub.DownloadCount);
@@ -228,7 +229,7 @@ namespace LegendasTV
             }
         }
 
-        private IEnumerable<RemoteSubtitleInfo> ParseHtml(string html, CultureDto lang)
+        private IEnumerable<RemoteSubtitleInfo> ParseHtml(Guid idMedia, string html, CultureDto lang)
         {
             var doc = new HtmlDocument();
             doc.LoadHtml(html);
@@ -250,6 +251,7 @@ namespace LegendasTV
                         name = name,
                         language = lang.TwoLetterISOLanguageName,
                         sortingOverride = subtitleNode.HasClass("destaque") ? -1 : 0,
+                        idMedia = idMedia
                     }.fullId,
                     Name = name,
                     DownloadCount = int.Parse(dataMatch[1].Value),
@@ -320,15 +322,9 @@ namespace LegendasTV
                 }
             }
 
-            var bestCandidate = "";
-            foreach (var file in _fileSystem.GetFiles(savePath, true))
-            {
-                _logger.Info(file.Name);
-                if (file.Extension.ToLowerInvariant() == ".srt" && (string.IsNullOrEmpty(bestCandidate) || _fileSystem.GetFileNameWithoutExtension(file.Name) == idParts.name))
-                {
-                    bestCandidate = file.FullName;
-                }
-            }
+            var media = _libraryManager.GetItemById(idParts.idMedia);
+            var subtitleFiles = _fileSystem.GetFiles(savePath, new string[] { ".srt", ".ass" }, false, true);
+            var bestCandidate = FindBestCandidate(media.FileNameWithoutExtension, subtitleFiles);
 
             _logger.Info("Best subtitle found: " + bestCandidate);
 
@@ -343,6 +339,37 @@ namespace LegendasTV
                 Stream = ms,
                 Language = idParts.language
             };
+        }
+
+        private string FindBestCandidate(string name, IEnumerable<FileSystemMetadata> subtitleFiles)
+        {
+            if (!subtitleFiles.Any())
+                return "";
+
+            var fileNameParts = BreakNameInParts(name);
+            var candidates = new List<Tuple<string, int>>();
+            foreach (var file in subtitleFiles)
+            {
+                var subtitleParts = BreakNameInParts(_fileSystem.GetFileNameWithoutExtension(file.Name));
+                var exceptions = fileNameParts.Except(subtitleParts);
+                candidates.Add(new Tuple<string, int>(file.FullName, exceptions.Count()));
+            }
+            var sorted = candidates.OrderBy(t => t.Item2);
+            _logger.Info($"Media file: {name}");
+            foreach (var compareResult in sorted)
+            {
+                _logger.Info($"File: {compareResult.Item1} has {compareResult.Item2} difference(s)");
+            }
+            return sorted.First().Item1;
+        }
+
+        private IEnumerable<string> BreakNameInParts(string name)
+        {
+            name = name.ToLowerInvariant();
+            name = Regex.Replace(name, "[-\\.,\\[\\]_=]", " ");
+            name = name.Trim();
+            name = Regex.Replace(name, " +", " ");
+            return name.Split(' ');
         }
 
         private string GetLanguageId(CultureDto cultureDto)
@@ -442,6 +469,7 @@ namespace LegendasTV
         public string downloadId;
         public string name;
         public string language;
+        public Guid idMedia;
         /// <summary>Set to higher number if this is to be sorted higher than the other parameters.</summary>
         public int sortingOverride = 0;
 
@@ -451,19 +479,20 @@ namespace LegendasTV
 
         public static LegendasTVIdParts parse(string id)
         {
-            var idParts = id.Split(new[] { ':' }, 4);
+            var idParts = id.Split(new[] { ':' }, 5);
             return new LegendasTVIdParts()
             {
                 downloadId = idParts[0],
                 name = idParts[1],
                 language = idParts[2],
                 sortingOverride = int.Parse(idParts[3]),
+                idMedia = Guid.Parse(idParts[4])
             };
         }
 
         public string fullId
         {
-            get => String.Join(":", downloadId, name, language, sortingOverride);
+            get => String.Join(":", downloadId, name, language, sortingOverride, idMedia.ToString());
         }
     }
 
